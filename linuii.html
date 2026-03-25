@@ -38,8 +38,8 @@ button { padding:8px 16px; background:#00c300; color:white; border:none; cursor:
 
 <script>
 // 変更前（IPアドレス指定）
-const socket = io("http://127.0.0.1:3000");
-//const socket = io("http://59.106.219.12:3000");
+//const socket = io("http://127.0.0.1:3000");
+const socket = io("https://chat-nwwb.onrender.com/");
 let peers = {};
 let username = prompt("名前を入力");
 let currentRoom = null;
