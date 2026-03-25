@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>P2P SNS マルチルーム LINE風チャット</title>
+<title>📡 P2P Multi-room Chat</title>
 
 <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 <script src="https://unpkg.com/simple-peer@9/simplepeer.min.js"></script>
@@ -18,73 +18,77 @@ body { text-align:center; font-family:sans-serif; background:#e5ddd5; margin:0; 
 #inputArea { display:flex; justify-content:center; margin-bottom:10px; }
 input { padding:8px; flex:1; max-width:250px; margin-right:5px; }
 button { padding:8px 16px; background:#00c300; color:white; border:none; cursor:pointer; }
+#loginArea { margin:20px; }
 </style>
 </head>
 <body>
 
-<h2>📡 P2P SNS マルチルーム LINE風チャット</h2>
-<div id="status">サーバー: 🔴 未接続</div>
-<div>接続人数: <span id="count">0</span></div>
-<div>
-  <input id="roomSelect" placeholder="ルーム名入力" value="room1">
-  <button onclick="joinRoom()">参加</button>
+<h1>📡 P2P Multi-room Chat</h1>
+<div id="status">🔴 未接続</div>
+<div id="loginArea">
+  <input id="usernameInput" placeholder="名前を入力">
+  <input id="roomInput" placeholder="ルーム名入力" value="room1">
+  <button onclick="login()">参加</button>
 </div>
-<div id="chat"></div>
-<div id="inputArea">
+<div id="chat" style="display:none;"></div>
+<div id="inputArea" style="display:none;">
   <input id="msg" placeholder="メッセージ入力">
   <button onclick="sendMsg()">送信</button>
 </div>
 <div id="log" style="display:none"></div>
 
 <script>
-// 変更前（IPアドレス指定）
 //const socket = io("http://127.0.0.1:3000");
-const socket = io("https://chat-nwwb.onrender.com/");
+const socket = io("https://chat-be-7cfg.onrender.com");
 let peers = {};
-let username = prompt("名前を入力");
+let username = null;
 let currentRoom = null;
 const statusEl = document.getElementById("status");
-const countEl = document.getElementById("count");
 const chatEl = document.getElementById("chat");
+const loginArea = document.getElementById("loginArea");
+const inputArea = document.getElementById("inputArea");
 
-socket.on('connect', () => {
-  statusEl.innerHTML = `サーバー: <span style='color:green'>🟡 サーバー接続OK</span>`;
-});
+socket.on('connect', () => { updateStatus(true); });
 
-socket.on('disconnect', () => {
-  statusEl.innerHTML = `サーバー: <span style='color:red'>🔴 サーバー切断</span>`;
-});
+socket.on('disconnect', () => { updateStatus(false); });
 
-socket.on('peers', users => { users.forEach(id => createPeer(id, true)); });
-socket.on('new-peer', id => { createPeer(id, false); });
+socket.on('peers', users => { users.forEach(id => createPeer(id, true)); updateStatus(true); });
+
+socket.on('new-peer', id => { createPeer(id, false); updateStatus(true); });
+
 socket.on('signal', data => { peers[data.from]?.signal(data.signal); });
-socket.on('peer-disconnect', id => { delete peers[id]; updateStatus(); });
 
-function joinRoom() {
-  const roomInput = document.getElementById('roomSelect');
-  const roomName = roomInput.value.trim();
-  if (!roomName) return;
+socket.on('peer-disconnect', id => { delete peers[id]; updateStatus(true); });
 
-  currentRoom = roomName;
-  peers = {};
-  chatEl.innerHTML = '';
+function login() {
+  const uname = document.getElementById('usernameInput').value.trim();
+  const room = document.getElementById('roomInput').value.trim();
+  if (!uname || !room) { alert('名前とルーム名を入力してください'); return; }
+
+  username = uname;
+  currentRoom = room;
+
+  loginArea.style.display = 'none';
+  chatEl.style.display = 'block';
+  inputArea.style.display = 'flex';
+
   socket.emit('join', currentRoom);
-  statusEl.innerHTML = `サーバー: <span style='color:orange'>🟡 ${currentRoom} に参加中</span>`;
+  updateStatus(true);
 }
 
 function createPeer(id, initiator) {
   const peer = new SimplePeer({ initiator, trickle:false });
   peer.on('signal', signal => socket.emit('signal', { to:id, signal }));
-  peer.on('connect', () => { updateStatus(); });
+  peer.on('connect', () => { updateStatus(true); });
   peer.on('data', data => {
     const text = new TextDecoder().decode(data);
     const obj = JSON.parse(text);
     addMessage(obj.name + "： " + obj.msg, false);
   });
-  peer.on('close', () => { delete peers[id]; updateStatus(); });
+  peer.on('close', () => { delete peers[id]; updateStatus(true); });
 
   peers[id] = peer;
-  updateStatus();
+  updateStatus(true);
 }
 
 function sendMsg() {
@@ -101,20 +105,27 @@ function sendMsg() {
 function addMessage(msg, me=false) {
   const div = document.createElement('div');
   div.className = 'message ' + (me ? 'me' : 'other');
-
-  // URLをリンクに変換
   const urlPattern = /(https?:\/\/\S+)/g;
   div.innerHTML = msg.replace(urlPattern, '<a href="$1" target="_blank">$1</a>');
-
   chatEl.appendChild(div);
   chatEl.scrollTop = chatEl.scrollHeight;
 }
 
-function updateStatus() {
-  const count = Object.keys(peers).length;
-  countEl.innerText = count;
-  if (count > 0) statusEl.innerHTML = `サーバー: <span style='color:green'>🟢 ${currentRoom}（P2P接続中）</span>`;
-  else statusEl.innerHTML = `サーバー: <span style='color:orange'>🟡 ${currentRoom}（相手待ち）</span>`;
+function updateStatus(isConnected=true) {
+  const count = Object.keys(peers).length + 1;
+
+  if (!username || !currentRoom) {
+    statusEl.innerHTML = '🔴 未接続';
+    return;
+  }
+
+  if (isConnected && count > 1) {
+    statusEl.innerHTML = `接続人数: (${count}): <span style='color:green'>🟢 ${username}（ ${currentRoom} 接続中）</span>`;
+  } else if (isConnected) {
+    statusEl.innerHTML = `接続人数: (${count}): <span style='color:green'>🟢 ${username}（ ${currentRoom} 接続中）</span>`;
+  } else {
+    statusEl.innerHTML = `接続人数: (${count}): <span style='color:red'>🔴 ${username}（ ${currentRoom} 接続障害）</span>`;
+  }
 }
 </script>
 
