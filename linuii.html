@@ -81,8 +81,49 @@ const participantsEl = document.getElementById('participants');
 const loginAreaEl = document.getElementById('loginArea');
 const inputAreaEl = document.getElementById('inputArea');
 const msgEl = document.getElementById('msg');
+const usernameInputEl = document.getElementById('usernameInput');
+const roomInputEl = document.getElementById('roomInput');
+const iconInputEl = document.getElementById('iconInput');
 
 document.getElementById('joinBtn').onclick = login;
+
+function decodeParam(value){
+  if (value === null || value === undefined) return null;
+  try {
+    return decodeURIComponent(String(value).replace(/\+/g, ' '));
+  } catch (e) {
+    return String(value);
+  }
+}
+
+function getParams(){
+  const params = new URLSearchParams(window.location.search);
+  return {
+    room: decodeParam(params.get('room')),
+    name: decodeParam(params.get('name')),
+    icon: decodeParam(params.get('icon'))
+  };
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  const usernameInput = document.getElementById('usernameInput');
+  const roomInput = document.getElementById('roomInput');
+  const iconInput = document.getElementById('iconInput');
+  const p = getParams();
+
+  const hasUrlParams = p.name !== null || p.room !== null || p.icon !== null;
+
+  if (hasUrlParams) {
+    usernameInput.value = p.name || '';
+    roomInput.value = p.room || 'room1';
+    iconInput.value = p.icon || '';
+    return;
+  }
+
+  usernameInput.value = localStorage.getItem('p2p_username') || '';
+  roomInput.value = localStorage.getItem('p2p_room') || 'room1';
+  iconInput.value = localStorage.getItem('p2p_iconUrl') || '';
+});
 document.getElementById('sendBtn').onclick = sendMsg;
 msgEl.addEventListener('keydown', (e) => {
   // Shift+Enter → 改行
@@ -163,6 +204,10 @@ function login(){
     alert('入力してください');
     return;
   }
+
+  localStorage.setItem('p2p_username', username);
+  localStorage.setItem('p2p_room', room);
+  localStorage.setItem('p2p_iconUrl', iconUrl);
 
   loginAreaEl.style.display = 'none';
   chatEl.style.display = 'block';
