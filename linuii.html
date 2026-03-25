@@ -9,125 +9,296 @@
 <script src="https://unpkg.com/simple-peer@9/simplepeer.min.js"></script>
 
 <style>
-body { text-align:center; font-family:sans-serif; background:#e5ddd5; margin:0; padding:0; }
-#chat { height:60vh; width:90vw; max-width:400px; border:1px solid #333; overflow:auto; margin:10px auto; padding:10px; }
-.message { max-width:70%; padding:8px 12px; margin:5px; border-radius:15px; clear:both; word-wrap:break-word; }
-.me { background:#95ec69; float:right; text-align:right; }
-.other { background:white; float:left; text-align:left; }
-#status { font-size:16px; margin:10px; padding:10px; border-radius:10px; }
-#inputArea { display:flex; justify-content:center; margin-bottom:10px; }
-input { padding:8px; flex:1; max-width:250px; margin-right:5px; }
-button { padding:8px 16px; background:#00c300; color:white; border:none; cursor:pointer; }
-#loginArea { margin:20px; }
+body { font-family:sans-serif; background:#e5ddd5; margin:0; }
+#container { max-width:420px; margin:0 auto; }
+#chat { height:55vh; overflow:auto; padding:10px; background:#d9f0d9; }
+
+.message { margin:6px; display:flex; align-items:flex-end; gap:6px; }
+.me { justify-content:flex-end; }
+.other { justify-content:flex-start; }
+
+.bubble {
+  max-width:70%;
+  padding:8px 12px;
+  border-radius:15px;
+  background:#fff;
+  word-break:break-word;
+  overflow-wrap:anywhere;
+}
+.me .bubble { background:#95ec69; }
+
+.bubble a {
+  color:blue;
+  text-decoration:underline;
+  word-break:break-all;
+}
+
+.meta { font-size:10px; margin-top:4px; }
+#status { padding:8px; font-size:14px; }
+#participants { padding:8px; background:#fff; margin:5px; border-radius:8px; }
+.badge { display:inline-flex; align-items:center; gap:4px; padding:3px 6px; margin:2px; border-radius:10px; background:#eee; }
+.avatar { width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; font-size:12px; font-weight:bold; object-fit:cover; }
+#inputArea { display:flex; padding:8px; gap:5px; }
+input { flex:1; padding:8px; }
+button { padding:8px; }
 </style>
 </head>
 <body>
+<div id="container">
+<h2>📡 P2P Multi-room Chat</h2>
+<div id="status"></div>
+<div id="participants"></div>
 
-<h1>📡 P2P Multi-room Chat</h1>
-<div id="status">🔴 未接続</div>
 <div id="loginArea">
-  <input id="usernameInput" placeholder="名前を入力">
-  <input id="roomInput" placeholder="ルーム名入力" value="room1">
-  <button onclick="login()">参加</button>
+  <input id="usernameInput" placeholder="名前">
+  <input id="roomInput" value="room1">
+  <input id="iconInput" placeholder="アイコンURL">
+  <button id="joinBtn">参加</button>
 </div>
-<div id="chat" style="display:none;"></div>
-<div id="inputArea" style="display:none;">
-  <input id="msg" placeholder="メッセージ入力">
-  <button onclick="sendMsg()">送信</button>
+
+<div id="chat" style="display:none"></div>
+<div id="inputArea" style="display:none">
+  <textarea id="msg" rows="2" style="flex:1; padding:8px; resize:none;"></textarea>
+  <button id="sendBtn">送信</button>
 </div>
-<div id="log" style="display:none"></div>
+</div>
 
 <script>
-//const socket = io("http://127.0.0.1:3000");
-const socket = io("https://chat-be-7cfg.onrender.com");
+//const socket = io("http://127.0.0.1:3000", { transports: ['websocket', 'polling'] });
+const socket = io("https://chat-be-7cfg.onrender.com", { transports: ['websocket', 'polling'] });
 let peers = {};
-let username = null;
-let currentRoom = null;
-const statusEl = document.getElementById("status");
-const chatEl = document.getElementById("chat");
-const loginArea = document.getElementById("loginArea");
-const inputArea = document.getElementById("inputArea");
+let peerNames = {};
+let peerIcons = {};
+let username = '';
+let room = '';
+let iconUrl = '';
+let msgSeq = 0;
+let readMap = {};
 
-socket.on('connect', () => { updateStatus(true); });
+const chatEl = document.getElementById('chat');
+const statusEl = document.getElementById('status');
+const participantsEl = document.getElementById('participants');
+const loginAreaEl = document.getElementById('loginArea');
+const inputAreaEl = document.getElementById('inputArea');
+const msgEl = document.getElementById('msg');
 
-socket.on('disconnect', () => { updateStatus(false); });
+document.getElementById('joinBtn').onclick = login;
+document.getElementById('sendBtn').onclick = sendMsg;
+msgEl.addEventListener('keydown', (e) => {
+  // Shift+Enter → 改行
+  if (e.key === 'Enter' && e.shiftKey) {
+    return;
+  }
+  // Enter → 送信しない（何もしない）
+  if (e.key === 'Enter') {
+    e.preventDefault();
+  }
+});
 
-socket.on('peers', users => { users.forEach(id => createPeer(id, true)); updateStatus(true); });
-
-socket.on('new-peer', id => { createPeer(id, false); updateStatus(true); });
-
-socket.on('signal', data => { peers[data.from]?.signal(data.signal); });
-
-socket.on('peer-disconnect', id => { delete peers[id]; updateStatus(true); });
-
-function login() {
-  const uname = document.getElementById('usernameInput').value.trim();
-  const room = document.getElementById('roomInput').value.trim();
-  if (!uname || !room) { alert('名前とルーム名を入力してください'); return; }
-
-  username = uname;
-  currentRoom = room;
-
-  loginArea.style.display = 'none';
-  chatEl.style.display = 'block';
-  inputArea.style.display = 'flex';
-
-  socket.emit('join', currentRoom);
-  updateStatus(true);
+function getColor(name){
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return `hsl(${Math.abs(hash) % 360}, 70%, 50%)`;
 }
 
-function createPeer(id, initiator) {
-  const peer = new SimplePeer({ initiator, trickle:false });
-  peer.on('signal', signal => socket.emit('signal', { to:id, signal }));
-  peer.on('connect', () => { updateStatus(true); });
-  peer.on('data', data => {
-    const text = new TextDecoder().decode(data);
-    const obj = JSON.parse(text);
-    addMessage(obj.name + "： " + obj.msg, false);
+function createAvatar(name, icon){
+  if (icon && icon.trim() !== '') {
+    return `<img class="avatar" src="${icon}" alt="${name}">`;
+  }
+  return `<div class="avatar" style="background:${getColor(name)}">${name[0] || '?'}</div>`;
+}
+
+function linkify(text){
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  return text.replace(urlRegex, function(url){
+    return '<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + url + '</a>';
   });
-  peer.on('close', () => { delete peers[id]; updateStatus(true); });
-
-  peers[id] = peer;
-  updateStatus(true);
 }
 
-function sendMsg() {
-  const msgInput = document.getElementById("msg");
-  const msg = msgInput.value.trim();
-  if (!msg || !currentRoom) return;
-
-  const data = JSON.stringify({ name:username, msg });
-  Object.values(peers).forEach(p => p.send(new TextEncoder().encode(data)));
-  addMessage("自分： " + msg, true);
-  msgInput.value = '';
+function updateStatus(){
+  if (!username || !room) {
+    statusEl.innerHTML = '';
+    return;
+  }
+  const uniqueNames = new Set([username, ...Object.values(peerNames)]);
+  const count = uniqueNames.size;
+  if (socket.connected) {
+    statusEl.innerHTML = `接続人数: (${count}): <span style="color:green">🟢 ${username}（ ${room} 接続中）</span>`;
+  } else {
+    statusEl.innerHTML = `接続人数: (${count}): <span style="color:red">🔴 ${username}（ ${room} 接続障害）</span>`;
+  }
 }
 
-function addMessage(msg, me=false) {
+function updateParticipants(){
+  if (!username) {
+    participantsEl.innerHTML = '';
+    return;
+  }
+  const names = new Set([username, ...Object.values(peerNames)]);
+  const html = Array.from(names).map(name => {
+    let icon = null;
+    if (name === username) {
+      icon = iconUrl;
+    } else {
+      for (const id in peerNames) {
+        if (peerNames[id] === name) {
+          icon = peerIcons[id] || null;
+          break;
+        }
+      }
+    }
+    return `<span class="badge">${createAvatar(name, icon)} ${name}</span>`;
+  }).join('');
+  participantsEl.innerHTML = '参加者: ' + html;
+}
+
+function login(){
+  username = document.getElementById('usernameInput').value.trim();
+  room = document.getElementById('roomInput').value.trim();
+  iconUrl = document.getElementById('iconInput').value.trim();
+
+  if (!username || !room) {
+    alert('入力してください');
+    return;
+  }
+
+  loginAreaEl.style.display = 'none';
+  chatEl.style.display = 'block';
+  inputAreaEl.style.display = 'flex';
+
+  socket.emit('join', room);
+  updateStatus();
+  updateParticipants();
+}
+
+socket.on('connect', () => {
+  updateStatus();
+});
+
+socket.on('disconnect', () => {
+  updateStatus();
+});
+
+socket.on('peers', list => {
+  list.forEach(id => createPeer(id, true));
+  updateStatus();
+  updateParticipants();
+});
+
+socket.on('new-peer', id => {
+  createPeer(id, false);
+  updateStatus();
+  updateParticipants();
+});
+
+socket.on('signal', d => {
+  peers[d.from]?.signal(d.signal);
+});
+
+function createPeer(id, initiator){
+  const p = new SimplePeer({ initiator, trickle: false });
+
+  p.on('signal', s => socket.emit('signal', { to: id, signal: s }));
+
+  p.on('connect', () => {
+    p.send(JSON.stringify({ type: 'intro', name: username, icon: iconUrl }));
+    updateStatus();
+  });
+
+  p.on('close', () => {
+    delete peers[id];
+    delete peerNames[id];
+    delete peerIcons[id];
+    updateStatus();
+    updateParticipants();
+  });
+
+  p.on('error', () => {
+    updateStatus();
+  });
+
+  p.on('data', d => {
+    let text;
+    try {
+      text = new TextDecoder().decode(d);
+    } catch (e) {
+      text = d;
+    }
+    const o = JSON.parse(text);
+
+    if (o.type === 'intro') {
+      peerNames[id] = o.name;
+      peerIcons[id] = o.icon || '';
+      updateStatus();
+      updateParticipants();
+      return;
+    }
+
+    if (o.type === 'msg') {
+      addMsg(o, false);
+      p.send(JSON.stringify({ type: 'read', id: o.id, name: username }));
+      return;
+    }
+
+    if (o.type === 'read') {
+      if (!readMap[o.id]) readMap[o.id] = new Set();
+      readMap[o.id].add(o.name);
+      updateRead(o.id);
+    }
+  });
+
+  peers[id] = p;
+  updateStatus();
+}
+
+function sendMsg(){
+  const text = msgEl.value.trim();
+  if (!text) return;
+
+  const id = 'm' + (++msgSeq);
+  const o = {
+    type: 'msg',
+    id,
+    name: username,
+    msg: text,
+    time: new Date().toLocaleTimeString(),
+    icon: iconUrl
+  };
+
+  readMap[id] = new Set();
+
+  Object.values(peers).forEach(p => p.send(JSON.stringify(o)));
+  addMsg(o, true);
+  msgEl.value = '';
+}
+
+function addMsg(o, me){
   const div = document.createElement('div');
   div.className = 'message ' + (me ? 'me' : 'other');
-  const urlPattern = /(https?:\/\/\S+)/g;
-  div.innerHTML = msg.replace(urlPattern, '<a href="$1" target="_blank">$1</a>');
+
+  const avatar = createAvatar(o.name, o.icon || '');
+  const msgHtml = linkify(o.msg);
+
+  div.innerHTML = `
+    ${!me ? avatar : ''}
+    <div class="bubble">
+      ${o.name}: ${msgHtml}
+      <div class="meta" id="meta_${o.id}">${o.time || ''} 送信</div>
+    </div>
+    ${me ? avatar : ''}
+  `;
+
   chatEl.appendChild(div);
   chatEl.scrollTop = chatEl.scrollHeight;
 }
 
-function updateStatus(isConnected=true) {
-  const count = Object.keys(peers).length + 1;
-
-  if (!username || !currentRoom) {
-    statusEl.innerHTML = '🔴 未接続';
-    return;
-  }
-
-  if (isConnected && count > 1) {
-    statusEl.innerHTML = `接続人数: (${count}): <span style='color:green'>🟢 ${username}（ ${currentRoom} 接続中）</span>`;
-  } else if (isConnected) {
-    statusEl.innerHTML = `接続人数: (${count}): <span style='color:green'>🟢 ${username}（ ${currentRoom} 接続中）</span>`;
-  } else {
-    statusEl.innerHTML = `接続人数: (${count}): <span style='color:red'>🔴 ${username}（ ${currentRoom} 接続障害）</span>`;
-  }
+function updateRead(id){
+  const el = document.getElementById('meta_' + id);
+  if (!el) return;
+  el.innerText = '既読';
 }
 </script>
-
 </body>
 </html>
