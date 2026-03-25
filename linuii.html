@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>P2P SNS マルチルーム LINE風チャット</title>
+
+<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+<script src="https://unpkg.com/simple-peer@9/simplepeer.min.js"></script>
+
+<style>
+body { text-align:center; font-family:sans-serif; background:#e5ddd5; margin:0; padding:0; }
+#chat { height:60vh; width:90vw; max-width:400px; border:1px solid #333; overflow:auto; margin:10px auto; padding:10px; }
+.message { max-width:70%; padding:8px 12px; margin:5px; border-radius:15px; clear:both; word-wrap:break-word; }
+.me { background:#95ec69; float:right; text-align:right; }
+.other { background:white; float:left; text-align:left; }
+#status { font-size:16px; margin:10px; padding:10px; border-radius:10px; }
+#inputArea { display:flex; justify-content:center; margin-bottom:10px; }
+input { padding:8px; flex:1; max-width:250px; margin-right:5px; }
+button { padding:8px 16px; background:#00c300; color:white; border:none; cursor:pointer; }
+</style>
+</head>
+<body>
+
+<h2>📡 P2P SNS マルチルーム LINE風チャット</h2>
+<div id="status">サーバー: 🔴 未接続</div>
+<div>接続人数: <span id="count">0</span></div>
+<div>
+  <input id="roomSelect" placeholder="ルーム名入力" value="room1">
+  <button onclick="joinRoom()">参加</button>
+</div>
+<div id="chat"></div>
+<div id="inputArea">
+  <input id="msg" placeholder="メッセージ入力">
+  <button onclick="sendMsg()">送信</button>
+</div>
+<div id="log" style="display:none"></div>
+
+<script>
+// 変更前（IPアドレス指定）
+const socket = io("http://127.0.0.1:3000");
+//const socket = io("http://59.106.219.12:3000");
+let peers = {};
+let username = prompt("名前を入力");
+let currentRoom = null;
+const statusEl = document.getElementById("status");
+const countEl = document.getElementById("count");
+const chatEl = document.getElementById("chat");
+
+socket.on('connect', () => {
+  statusEl.innerHTML = `サーバー: <span style='color:green'>🟡 サーバー接続OK</span>`;
+});
+
+socket.on('disconnect', () => {
+  statusEl.innerHTML = `サーバー: <span style='color:red'>🔴 サーバー切断</span>`;
+});
+
+socket.on('peers', users => { users.forEach(id => createPeer(id, true)); });
+socket.on('new-peer', id => { createPeer(id, false); });
+socket.on('signal', data => { peers[data.from]?.signal(data.signal); });
+socket.on('peer-disconnect', id => { delete peers[id]; updateStatus(); });
+
+function joinRoom() {
+  const roomInput = document.getElementById('roomSelect');
+  const roomName = roomInput.value.trim();
+  if (!roomName) return;
+
+  currentRoom = roomName;
+  peers = {};
+  chatEl.innerHTML = '';
+  socket.emit('join', currentRoom);
+  statusEl.innerHTML = `サーバー: <span style='color:orange'>🟡 ${currentRoom} に参加中</span>`;
+}
+
+function createPeer(id, initiator) {
+  const peer = new SimplePeer({ initiator, trickle:false });
+  peer.on('signal', signal => socket.emit('signal', { to:id, signal }));
+  peer.on('connect', () => { updateStatus(); });
+  peer.on('data', data => {
+    const text = new TextDecoder().decode(data);
+    const obj = JSON.parse(text);
+    addMessage(obj.name + "： " + obj.msg, false);
+  });
+  peer.on('close', () => { delete peers[id]; updateStatus(); });
+
+  peers[id] = peer;
+  updateStatus();
+}
+
+function sendMsg() {
+  const msgInput = document.getElementById("msg");
+  const msg = msgInput.value.trim();
+  if (!msg || !currentRoom) return;
+
+  const data = JSON.stringify({ name:username, msg });
+  Object.values(peers).forEach(p => p.send(new TextEncoder().encode(data)));
+  addMessage("自分： " + msg, true);
+  msgInput.value = '';
+}
+
+function addMessage(msg, me=false) {
+  const div = document.createElement('div');
+  div.className = 'message ' + (me ? 'me' : 'other');
+
+  // URLをリンクに変換
+  const urlPattern = /(https?:\/\/\S+)/g;
+  div.innerHTML = msg.replace(urlPattern, '<a href="$1" target="_blank">$1</a>');
+
+  chatEl.appendChild(div);
+  chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+function updateStatus() {
+  const count = Object.keys(peers).length;
+  countEl.innerText = count;
+  if (count > 0) statusEl.innerHTML = `サーバー: <span style='color:green'>🟢 ${currentRoom}（P2P接続中）</span>`;
+  else statusEl.innerHTML = `サーバー: <span style='color:orange'>🟡 ${currentRoom}（相手待ち）</span>`;
+}
+</script>
+
+</body>
+</html>
